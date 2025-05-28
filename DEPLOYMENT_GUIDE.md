@@ -6,6 +6,7 @@
 2. [安装与配置](#安装与配置)
    - [系统要求](#系统要求)
    - [安装步骤](#安装步骤)
+   - [SSH密钥配置](#ssh密钥配置)
    - [配置文件](#配置文件)
 3. [核心功能模块](#核心功能模块)
    - [视觉思考记录器](#视觉思考记录器)
@@ -22,6 +23,10 @@
 6. [最佳实践](#最佳实践)
 7. [API参考](#api参考)
 8. [更新与维护](#更新与维护)
+9. [高级功能](#高级功能)
+   - [自定义配置](#自定义配置)
+   - [日志与报告](#日志与报告)
+   - [集成到CI/CD](#集成到cicd)
 
 ## 系统概述
 
@@ -50,6 +55,11 @@ PowerAutomation MCP工具是一个专为 https://github.com/alexchuang650730/pow
   - opencv-python (图像处理)
   - pillow (图像处理)
   - pyyaml (配置文件处理)
+- **Git**：Git 2.20或更高版本
+- **GitHub CLI**（可选）：用于创建release和查看release信息
+- **SSH密钥**：用于GitHub认证
+- **磁盘空间**：至少500MB可用空间
+- **网络**：稳定的互联网连接
 
 ### 安装步骤
 
@@ -60,13 +70,20 @@ git clone https://github.com/alexchuang650730/powerautomation_mcp.git
 cd powerautomation_mcp
 ```
 
-2. **安装依赖**：
+2. **创建并激活虚拟环境**（推荐）：
+
+```bash
+python -m venv myenv
+source myenv/bin/activate  # 在macOS/Linux上
+```
+
+3. **安装依赖**：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **安装OCR引擎**：
+4. **安装OCR引擎**：
 
 ```bash
 # macOS
@@ -75,15 +92,45 @@ brew install tesseract
 # 或者使用其他包管理器
 ```
 
-4. **安装Playwright浏览器**：
+5. **安装Playwright浏览器**：
 
 ```bash
 playwright install
 ```
 
-5. **配置SSH密钥**（用于GitHub访问）：
+### SSH密钥配置
 
-确保您的SSH密钥已配置并添加到GitHub账户。默认路径为`~/.ssh/id_rsa`。
+MCP工具使用SSH密钥与GitHub进行认证，确保您已经设置了SSH密钥并添加到GitHub账户：
+
+1. 检查是否已有SSH密钥：
+
+```bash
+ls -la ~/.ssh
+```
+
+2. 如果没有，生成新的SSH密钥：
+
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+```
+
+3. 将SSH密钥添加到ssh-agent：
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+```
+
+4. 将公钥添加到GitHub账户：
+   - 复制公钥内容：`cat ~/.ssh/id_ed25519.pub`
+   - 在GitHub中，转到Settings > SSH and GPG keys > New SSH key
+   - 粘贴公钥内容并保存
+
+5. 测试SSH连接：
+
+```bash
+ssh -T git@github.com
+```
 
 ### 配置文件
 
@@ -232,6 +279,7 @@ updater.update_readme_with_test_results()
 - 生成问题定位报告
 - 提出修复策略
 - 制定测试方案
+- **版本回滚管理**：支持每个版本的回滚，在持续出错时回滚至保存点
 
 **分析问题并生成解决方案**：
 
@@ -482,6 +530,9 @@ class ManusProblemSolver:
     def __init__(self, repo_path=None, enhanced_recorder=None, test_updater=None, rules_checker=None)
     def analyze_issues_and_generate_solutions(issues=None)
     def save_solutions_to_file(solutions, output_dir=None)
+    def create_save_point(name=None)
+    def list_save_points()
+    def rollback_to_save_point(save_point_id)
 ```
 
 ### ReleaseRulesChecker
@@ -542,6 +593,72 @@ python -m mcp_tool.cli config
 cp -r ~/.powerautomation_mcp ~/backups/powerautomation_mcp_$(date +%Y%m%d)
 ```
 
----
+## 高级功能
 
-如有任何问题或需要进一步的支持，请联系项目维护者或提交GitHub issue。
+### 自定义配置
+
+您可以通过命令行参数指定配置文件路径：
+
+```bash
+python -m mcp_tool.cli workflow --config /path/to/custom_config.json
+```
+
+也可以通过环境变量设置配置文件路径：
+
+```bash
+export MCP_CONFIG_PATH=/path/to/custom_config.json
+python -m mcp_tool.cli workflow
+```
+
+### 日志与报告
+
+MCP工具会自动生成详细的日志和报告：
+
+- **日志**：保存在`{local_repo_path}/logs`目录下
+- **测试报告**：保存在`{local_repo_path}/output`目录下
+- **工作流程报告**：保存在`{local_repo_path}/reports`目录下
+- **解决方案**：保存在`{local_repo_path}/manus_solutions`目录下
+
+查看最新的工作流程报告：
+
+```bash
+ls -lt $(python -m mcp_tool.cli config --get local_repo_path)/reports | head -n 2
+```
+
+### 集成到CI/CD
+
+MCP工具可以集成到CI/CD流程中，例如使用GitHub Actions：
+
+```yaml
+name: PowerAutomation MCP Workflow
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  mcp-workflow:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Set up SSH key
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Run MCP workflow
+        run: |
+          python -m mcp_tool.cli workflow --tag ${{ github.event.release.tag_name }}
+```

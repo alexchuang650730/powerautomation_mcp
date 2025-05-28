@@ -1,24 +1,33 @@
 """
-Release下载与GitHub上传模块 - ReleaseManager
+Release管理器模块 - ReleaseManager
 
-该模块负责监控GitHub release事件，自动下载代码到Mac端侧，
-并处理GitHub上传流程，支持SSH密钥认证。
+该模块用于管理GitHub release，包括检测新release、下载代码到端侧Mac和上传更改到GitHub。
+主要功能：
+1. 监控GitHub release事件
+2. 自动下载代码到指定Mac路径
+3. 处理GitHub上传流程
+4. 管理SSH密钥和权限
+5. 支持增量和全量更新
 
 作者: Manus AI
 日期: 2025-05-28
 """
 
 import os
-import time
-import logging
 import json
-import shutil
+import time
+import datetime
 import subprocess
+import logging
+import shutil
 import requests
-from typing import Dict, List, Any, Optional, Tuple, Union
-from datetime import datetime
 import tempfile
 import re
+from typing import Dict, List, Any, Optional, Union, Tuple
+from datetime import datetime
+
+# 导入思考与操作记录器
+from .thought_action_recorder import ThoughtActionRecorder
 
 # 配置日志
 logging.basicConfig(
@@ -29,13 +38,12 @@ logger = logging.getLogger("ReleaseManager")
 
 class ReleaseManager:
     """
-    Release管理器，负责监控GitHub release事件，
-    自动下载代码到Mac端侧，并处理GitHub上传流程。
+    Release管理器，负责监控GitHub release事件，下载代码到本地，并处理GitHub上传流程。
     """
     
     def __init__(self, 
-                 repo_url: str,
-                 local_repo_path: str,
+                 repo_url: Optional[str] = None,
+                 local_repo_path: Optional[str] = None,
                  github_token: Optional[str] = None,
                  ssh_key_path: Optional[str] = None,
                  check_interval: float = 3600.0):
@@ -43,472 +51,147 @@ class ReleaseManager:
         初始化Release管理器
         
         Args:
-            repo_url: GitHub仓库URL
-            local_repo_path: 本地仓库路径
-            github_token: GitHub个人访问令牌（可选）
-            ssh_key_path: SSH密钥路径（可选）
+            repo_url: GitHub仓库URL，如果为None则使用默认URL
+            local_repo_path: 本地仓库路径，如果为None则使用默认路径
+            github_token: GitHub令牌，如果为None则使用SSH密钥
+            ssh_key_path: SSH密钥路径，如果为None则使用默认路径
             check_interval: 检查间隔（秒）
         """
-        self.repo_url = repo_url
-        self.local_repo_path = os.path.expanduser(local_repo_path)
+        self.repo_url = repo_url or "https://github.com/alexchuang650730/powerautomation.git"
+        self.local_repo_path = local_repo_path or os.path.expanduser("~/powerassistant/powerautomation")
         self.github_token = github_token
-        self.ssh_key_path = os.path.expanduser(ssh_key_path) if ssh_key_path else None
+        self.ssh_key_path = ssh_key_path or os.path.expanduser("~/.ssh/id_rsa")
         self.check_interval = check_interval
         
-        # 解析仓库信息
-        self.repo_owner, self.repo_name = self._parse_repo_url(repo_url)
+        # 提取仓库所有者和名称
+        match = re.search(r"github\.com[:/]([^/]+)/([^/\.]+)(?:\.git)?", self.repo_url)
+        if match:
+            self.repo_owner = match.group(1)
+            self.repo_name = match.group(2)
+        else:
+            self.repo_owner = "alexchuang650730"
+            self.repo_name = "powerautomation"
         
-        # 创建本地仓库目录
+        # 记录器
+        self.recorder = ThoughtActionRecorder()
+        
+        # 最后检查时间
+        self.last_check_time = 0
+        
+        # 最后下载的release
+        self.last_downloaded_release = None
+        
+        # 确保本地仓库目录存在
         os.makedirs(self.local_repo_path, exist_ok=True)
         
-        # 最新release信息
-        self.latest_release = None
-        
-        logger.info(f"初始化Release管理器: {self.repo_owner}/{self.repo_name} -> {self.local_repo_path}")
-    
-    def _parse_repo_url(self, repo_url: str) -> Tuple[str, str]:
-        """
-        解析仓库URL，提取所有者和仓库名
-        
-        Args:
-            repo_url: GitHub仓库URL
-            
-        Returns:
-            Tuple[str, str]: 仓库所有者和仓库名
-        """
-        # 支持多种URL格式
-        # https://github.com/owner/repo.git
-        # git@github.com:owner/repo.git
-        # https://github.com/owner/repo
-        
-        if "github.com" not in repo_url:
-            raise ValueError(f"不支持的仓库URL格式: {repo_url}")
-        
-        if repo_url.startswith("git@github.com:"):
-            # SSH格式
-            path = repo_url.split("git@github.com:")[1]
-        elif "github.com/" in repo_url:
-            # HTTPS格式
-            path = repo_url.split("github.com/")[1]
-        else:
-            raise ValueError(f"无法解析仓库URL: {repo_url}")
-        
-        # 移除.git后缀
-        path = path.replace(".git", "")
-        
-        # 分割所有者和仓库名
-        parts = path.split("/")
-        if len(parts) != 2:
-            raise ValueError(f"无法解析仓库所有者和名称: {path}")
-        
-        return parts[0], parts[1]
-    
-    def check_latest_release(self) -> Dict:
-        """
-        检查最新的release
-        
-        Returns:
-            Dict: 最新release信息
-        """
-        logger.info(f"检查 {self.repo_owner}/{self.repo_name} 的最新release")
-        
-        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases/latest"
-        
-        headers = {
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        if self.github_token:
-            headers["Authorization"] = f"token {self.github_token}"
-        
-        try:
-            response = requests.get(api_url, headers=headers)
-            response.raise_for_status()
-            
-            release_info = response.json()
-            logger.info(f"获取到最新release: {release_info['tag_name']}")
-            
-            self.latest_release = release_info
-            return release_info
-        except requests.exceptions.RequestException as e:
-            logger.error(f"获取最新release失败: {e}")
-            return None
+        logger.info(f"Release管理器初始化完成，仓库: {self.repo_url}, 本地路径: {self.local_repo_path}")
     
     def is_new_release_available(self) -> bool:
         """
         检查是否有新的release可用
         
         Returns:
-            bool: 如果有新的release可用，返回True；否则返回False
+            bool: 是否有新的release
         """
+        self.recorder.record_thought("检查是否有新的release可用")
+        
         # 获取最新release
-        latest_release = self.check_latest_release()
-        if not latest_release:
+        latest_release = self._get_latest_release()
+        
+        if latest_release is None:
+            logger.info("无法获取最新release信息")
             return False
         
-        # 检查本地记录
-        local_record_path = os.path.join(self.local_repo_path, ".release_record")
-        if not os.path.exists(local_record_path):
-            logger.info("本地没有release记录，视为有新release可用")
-            return True
+        # 检查本地是否已有该release
+        if self._is_release_downloaded(latest_release["tag_name"]):
+            logger.info(f"最新release {latest_release['tag_name']} 已下载")
+            return False
         
-        try:
-            with open(local_record_path, "r") as f:
-                local_record = json.load(f)
-            
-            local_tag = local_record.get("tag_name")
-            latest_tag = latest_release.get("tag_name")
-            
-            if local_tag != latest_tag:
-                logger.info(f"发现新release: {local_tag} -> {latest_tag}")
-                return True
-            else:
-                logger.info(f"没有新release可用，当前版本: {local_tag}")
-                return False
-        except Exception as e:
-            logger.error(f"检查本地release记录失败: {e}")
-            return True  # 出错时假设有新release可用
+        logger.info(f"发现新release: {latest_release['tag_name']}")
+        return True
     
-    def download_release(self, tag_name: Optional[str] = None) -> bool:
+    def download_release(self, tag_name: Optional[str] = None) -> Dict:
         """
-        下载指定tag的release代码
+        下载指定标签的release，如果未指定则下载最新release
         
         Args:
             tag_name: release标签名，如果为None则下载最新release
             
         Returns:
-            bool: 如果下载成功，返回True；否则返回False
+            Dict: 下载结果
         """
-        # 如果未指定tag，获取最新release
-        if not tag_name:
-            if not self.latest_release:
-                self.check_latest_release()
-            
-            if not self.latest_release:
-                logger.error("无法获取最新release信息")
-                return False
-            
-            tag_name = self.latest_release["tag_name"]
+        self.recorder.record_thought(f"下载release: {tag_name or '最新'}")
         
-        logger.info(f"开始下载release: {tag_name}")
-        
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp()
-        
-        try:
-            # 克隆仓库到临时目录
-            clone_url = self._get_clone_url()
-            clone_cmd = ["git", "clone", "--depth", "1"]
-            
-            if tag_name:
-                clone_cmd.extend(["--branch", tag_name])
-            
-            clone_cmd.extend([clone_url, temp_dir])
-            
-            logger.info(f"执行克隆命令: {' '.join(clone_cmd)}")
-            subprocess.run(clone_cmd, check=True, capture_output=True)
-            
-            # 移除.git目录
-            git_dir = os.path.join(temp_dir, ".git")
-            if os.path.exists(git_dir):
-                shutil.rmtree(git_dir)
-            
-            # 清空本地仓库目录（保留.git和.release_record）
-            self._clean_local_repo()
-            
-            # 复制文件到本地仓库
-            self._copy_files(temp_dir, self.local_repo_path)
-            
-            # 更新本地release记录
-            self._update_release_record(tag_name)
-            
-            logger.info(f"成功下载release {tag_name} 到 {self.local_repo_path}")
-            return True
-        except Exception as e:
-            logger.error(f"下载release失败: {e}")
-            return False
-        finally:
-            # 清理临时目录
-            shutil.rmtree(temp_dir)
-    
-    def _get_clone_url(self) -> str:
-        """
-        获取克隆URL
-        
-        Returns:
-            str: 克隆URL
-        """
-        if self.ssh_key_path:
-            # 使用SSH URL
-            return f"git@github.com:{self.repo_owner}/{self.repo_name}.git"
+        # 获取release信息
+        if tag_name is None:
+            release = self._get_latest_release()
+            if release is None:
+                error_message = "无法获取最新release信息"
+                logger.error(error_message)
+                
+                return {
+                    "status": "failed",
+                    "message": error_message,
+                    "timestamp": datetime.now().isoformat()
+                }
         else:
-            # 使用HTTPS URL
-            if self.github_token:
-                return f"https://{self.github_token}@github.com/{self.repo_owner}/{self.repo_name}.git"
-            else:
-                return f"https://github.com/{self.repo_owner}/{self.repo_name}.git"
-    
-    def _clean_local_repo(self):
-        """清空本地仓库目录，但保留.git和.release_record"""
-        for item in os.listdir(self.local_repo_path):
-            if item in [".git", ".release_record"]:
-                continue
-            
-            item_path = os.path.join(self.local_repo_path, item)
-            if os.path.isdir(item_path):
-                shutil.rmtree(item_path)
-            else:
-                os.remove(item_path)
-    
-    def _copy_files(self, src_dir: str, dst_dir: str):
-        """
-        复制文件
+            release = self._get_release_by_tag(tag_name)
+            if release is None:
+                error_message = f"无法获取标签为 {tag_name} 的release信息"
+                logger.error(error_message)
+                
+                return {
+                    "status": "failed",
+                    "message": error_message,
+                    "timestamp": datetime.now().isoformat()
+                }
         
-        Args:
-            src_dir: 源目录
-            dst_dir: 目标目录
-        """
-        for item in os.listdir(src_dir):
-            src_path = os.path.join(src_dir, item)
-            dst_path = os.path.join(dst_dir, item)
-            
-            if os.path.isdir(src_path):
-                shutil.copytree(src_path, dst_path)
-            else:
-                shutil.copy2(src_path, dst_path)
-    
-    def _update_release_record(self, tag_name: str):
-        """
-        更新本地release记录
-        
-        Args:
-            tag_name: release标签名
-        """
-        record = {
-            "tag_name": tag_name,
-            "downloaded_at": datetime.now().isoformat()
-        }
-        
-        record_path = os.path.join(self.local_repo_path, ".release_record")
-        with open(record_path, "w") as f:
-            json.dump(record, f, indent=2)
-    
-    def upload_to_github(self, commit_message: str, branch: str = "main") -> bool:
-        """
-        将本地代码上传到GitHub
-        
-        Args:
-            commit_message: 提交信息
-            branch: 分支名称
-            
-        Returns:
-            bool: 如果上传成功，返回True；否则返回False
-        """
-        logger.info(f"开始上传代码到GitHub: {self.repo_owner}/{self.repo_name}")
-        
+        # 下载release
         try:
-            # 检查本地仓库是否已初始化Git
-            git_dir = os.path.join(self.local_repo_path, ".git")
-            if not os.path.exists(git_dir):
-                # 初始化Git仓库
-                self._init_git_repo()
+            # 备份当前代码
+            self._backup_current_code()
             
-            # 配置Git
-            self._configure_git()
+            # 下载代码
+            self._download_release_code(release)
             
-            # 添加所有文件
-            add_cmd = ["git", "add", "."]
-            subprocess.run(add_cmd, cwd=self.local_repo_path, check=True)
+            # 更新最后下载的release
+            self.last_downloaded_release = release["tag_name"]
             
-            # 提交更改
-            commit_cmd = ["git", "commit", "-m", commit_message]
-            subprocess.run(commit_cmd, cwd=self.local_repo_path, check=True)
+            result = {
+                "status": "success",
+                "message": f"成功下载release {release['tag_name']}",
+                "tag": release["tag_name"],
+                "timestamp": datetime.now().isoformat()
+            }
             
-            # 推送到GitHub
-            push_cmd = ["git", "push", "-u", "origin", branch]
-            subprocess.run(push_cmd, cwd=self.local_repo_path, check=True)
+            self.recorder.record_action(
+                "download_release", 
+                {"tag_name": tag_name},
+                result
+            )
             
-            logger.info(f"成功上传代码到GitHub: {self.repo_owner}/{self.repo_name}")
-            return True
+            return result
+        
         except Exception as e:
-            logger.error(f"上传代码到GitHub失败: {e}")
-            return False
-    
-    def _init_git_repo(self):
-        """初始化Git仓库"""
-        logger.info(f"初始化Git仓库: {self.local_repo_path}")
-        
-        # 初始化仓库
-        init_cmd = ["git", "init"]
-        subprocess.run(init_cmd, cwd=self.local_repo_path, check=True)
-        
-        # 添加远程仓库
-        remote_url = self._get_clone_url()
-        remote_cmd = ["git", "remote", "add", "origin", remote_url]
-        subprocess.run(remote_cmd, cwd=self.local_repo_path, check=True)
-    
-    def _configure_git(self):
-        """配置Git"""
-        # 配置用户名和邮箱
-        subprocess.run(["git", "config", "user.name", "PowerAutomation MCP"], cwd=self.local_repo_path)
-        subprocess.run(["git", "config", "user.email", "powerautomation@example.com"], cwd=self.local_repo_path)
-        
-        # 如果使用SSH密钥，配置SSH
-        if self.ssh_key_path:
-            # 确保SSH配置目录存在
-            ssh_dir = os.path.expanduser("~/.ssh")
-            os.makedirs(ssh_dir, exist_ok=True)
+            error_message = f"下载release异常: {str(e)}"
+            logger.error(error_message)
             
-            # 配置SSH密钥
-            ssh_config_path = os.path.join(ssh_dir, "config")
-            with open(ssh_config_path, "a+") as f:
-                f.seek(0)
-                content = f.read()
-                
-                # 检查是否已配置
-                if f"IdentityFile {self.ssh_key_path}" not in content:
-                    f.write(f"\nHost github.com\n  IdentityFile {self.ssh_key_path}\n  User git\n")
-    
-    def create_release(self, tag_name: str, release_name: str, body: str, draft: bool = False, prerelease: bool = False) -> Dict:
-        """
-        创建新的GitHub release
-        
-        Args:
-            tag_name: 标签名
-            release_name: release名称
-            body: release描述
-            draft: 是否为草稿
-            prerelease: 是否为预发布
+            # 恢复备份
+            self._restore_backup()
             
-        Returns:
-            Dict: 创建的release信息
-        """
-        if not self.github_token:
-            logger.error("创建release需要GitHub令牌")
-            return None
-        
-        logger.info(f"开始创建release: {tag_name}")
-        
-        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases"
-        
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"token {self.github_token}"
-        }
-        
-        data = {
-            "tag_name": tag_name,
-            "name": release_name,
-            "body": body,
-            "draft": draft,
-            "prerelease": prerelease
-        }
-        
-        try:
-            response = requests.post(api_url, headers=headers, json=data)
-            response.raise_for_status()
+            result = {
+                "status": "failed",
+                "message": error_message,
+                "timestamp": datetime.now().isoformat()
+            }
             
-            release_info = response.json()
-            logger.info(f"成功创建release: {release_info['tag_name']}")
+            self.recorder.record_action(
+                "download_release", 
+                {"tag_name": tag_name},
+                result
+            )
             
-            self.latest_release = release_info
-            return release_info
-        except requests.exceptions.RequestException as e:
-            logger.error(f"创建release失败: {e}")
-            return None
-    
-    def monitor_releases(self, callback=None):
-        """
-        监控releases，当有新release时执行回调函数
-        
-        Args:
-            callback: 回调函数，接收release信息作为参数
-        """
-        logger.info(f"开始监控 {self.repo_owner}/{self.repo_name} 的releases")
-        
-        while True:
-            try:
-                if self.is_new_release_available():
-                    if callback:
-                        callback(self.latest_release)
-                
-                time.sleep(self.check_interval)
-            except KeyboardInterrupt:
-                logger.info("监控被用户中断")
-                break
-            except Exception as e:
-                logger.error(f"监控releases时发生错误: {e}")
-                time.sleep(self.check_interval)
-    
-    def get_release_by_tag(self, tag_name: str) -> Dict:
-        """
-        获取指定tag的release信息
-        
-        Args:
-            tag_name: 标签名
-            
-        Returns:
-            Dict: release信息
-        """
-        logger.info(f"获取tag为 {tag_name} 的release信息")
-        
-        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases/tags/{tag_name}"
-        
-        headers = {
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        if self.github_token:
-            headers["Authorization"] = f"token {self.github_token}"
-        
-        try:
-            response = requests.get(api_url, headers=headers)
-            response.raise_for_status()
-            
-            release_info = response.json()
-            logger.info(f"获取到release: {release_info['tag_name']}")
-            
-            return release_info
-        except requests.exceptions.RequestException as e:
-            logger.error(f"获取release失败: {e}")
-            return None
-    
-    def list_releases(self, limit: int = 10) -> List[Dict]:
-        """
-        列出最近的releases
-        
-        Args:
-            limit: 最大数量
-            
-        Returns:
-            List[Dict]: release列表
-        """
-        logger.info(f"列出 {self.repo_owner}/{self.repo_name} 的releases")
-        
-        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases"
-        
-        headers = {
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        if self.github_token:
-            headers["Authorization"] = f"token {self.github_token}"
-        
-        params = {
-            "per_page": limit
-        }
-        
-        try:
-            response = requests.get(api_url, headers=headers, params=params)
-            response.raise_for_status()
-            
-            releases = response.json()
-            logger.info(f"获取到 {len(releases)} 个releases")
-            
-            return releases
-        except requests.exceptions.RequestException as e:
-            logger.error(f"列出releases失败: {e}")
-            return []
+            return result
     
     def get_local_repo_status(self) -> Dict:
         """
@@ -517,57 +200,446 @@ class ReleaseManager:
         Returns:
             Dict: 本地仓库状态
         """
-        status = {
-            "path": self.local_repo_path,
-            "exists": os.path.exists(self.local_repo_path),
-            "is_git_repo": False,
-            "current_branch": None,
-            "has_changes": False,
-            "last_commit": None,
-            "release_record": None
-        }
+        self.recorder.record_thought("获取本地仓库状态")
         
-        if not status["exists"]:
-            return status
+        # 检查本地仓库是否存在
+        if not os.path.exists(os.path.join(self.local_repo_path, ".git")):
+            return {
+                "status": "not_git_repo",
+                "has_changes": False,
+                "timestamp": datetime.now().isoformat()
+            }
         
-        # 检查是否为Git仓库
-        git_dir = os.path.join(self.local_repo_path, ".git")
-        status["is_git_repo"] = os.path.exists(git_dir)
+        # 获取git状态
+        try:
+            # 获取未暂存的更改
+            unstaged_changes = self._run_git_command("git status --porcelain")
+            
+            # 获取当前分支
+            current_branch = self._run_git_command("git rev-parse --abbrev-ref HEAD").strip()
+            
+            # 获取最后一次提交
+            last_commit = self._run_git_command("git log -1 --pretty=format:'%h - %s (%cr)'").strip()
+            
+            result = {
+                "status": "ok",
+                "has_changes": bool(unstaged_changes),
+                "current_branch": current_branch,
+                "last_commit": last_commit,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.recorder.record_action(
+                "get_local_repo_status", 
+                {},
+                result
+            )
+            
+            return result
         
-        if status["is_git_repo"]:
+        except Exception as e:
+            error_message = f"获取本地仓库状态异常: {str(e)}"
+            logger.error(error_message)
+            
+            result = {
+                "status": "error",
+                "message": error_message,
+                "has_changes": False,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.recorder.record_action(
+                "get_local_repo_status", 
+                {},
+                result
+            )
+            
+            return result
+    
+    def upload_to_github(self, commit_message: str) -> Dict:
+        """
+        将本地更改上传到GitHub
+        
+        Args:
+            commit_message: 提交信息
+            
+        Returns:
+            Dict: 上传结果
+        """
+        self.recorder.record_thought(f"上传本地更改到GitHub: {commit_message}")
+        
+        # 检查本地仓库是否存在
+        if not os.path.exists(os.path.join(self.local_repo_path, ".git")):
+            error_message = "本地目录不是git仓库"
+            logger.error(error_message)
+            
+            return {
+                "status": "failed",
+                "message": error_message,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # 上传更改
+        try:
+            # 添加所有更改
+            self._run_git_command("git add .")
+            
+            # 提交更改
+            self._run_git_command(f"git commit -m '{commit_message}'")
+            
+            # 推送到GitHub
+            self._run_git_command("git push origin HEAD")
+            
+            # 获取提交ID
+            commit_id = self._run_git_command("git rev-parse HEAD").strip()
+            
+            result = {
+                "status": "success",
+                "message": f"成功上传更改: {commit_message}",
+                "commit_id": commit_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.recorder.record_action(
+                "upload_to_github", 
+                {"commit_message": commit_message},
+                result
+            )
+            
+            return result
+        
+        except Exception as e:
+            error_message = f"上传更改异常: {str(e)}"
+            logger.error(error_message)
+            
+            result = {
+                "status": "failed",
+                "message": error_message,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.recorder.record_action(
+                "upload_to_github", 
+                {"commit_message": commit_message},
+                result
+            )
+            
+            return result
+    
+    def monitor_releases(self, callback: Optional[callable] = None) -> None:
+        """
+        监控releases，当有新release时调用回调函数
+        
+        Args:
+            callback: 回调函数，接收release信息作为参数
+        """
+        self.recorder.record_thought("开始监控releases")
+        
+        while True:
             try:
-                # 获取当前分支
-                branch_cmd = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
-                branch_result = subprocess.run(branch_cmd, cwd=self.local_repo_path, capture_output=True, text=True, check=True)
-                status["current_branch"] = branch_result.stdout.strip()
+                # 检查是否有新release
+                if self.is_new_release_available():
+                    # 获取最新release
+                    latest_release = self._get_latest_release()
+                    
+                    # 调用回调函数
+                    if callback is not None:
+                        callback(latest_release)
                 
-                # 检查是否有未提交的更改
-                status_cmd = ["git", "status", "--porcelain"]
-                status_result = subprocess.run(status_cmd, cwd=self.local_repo_path, capture_output=True, text=True, check=True)
-                status["has_changes"] = bool(status_result.stdout.strip())
+                # 更新最后检查时间
+                self.last_check_time = time.time()
                 
-                # 获取最后一次提交
-                log_cmd = ["git", "log", "-1", "--pretty=format:%h|%an|%ad|%s"]
-                log_result = subprocess.run(log_cmd, cwd=self.local_repo_path, capture_output=True, text=True)
-                if log_result.returncode == 0:
-                    parts = log_result.stdout.strip().split("|")
-                    if len(parts) == 4:
-                        status["last_commit"] = {
-                            "hash": parts[0],
-                            "author": parts[1],
-                            "date": parts[2],
-                            "message": parts[3]
-                        }
+                # 等待下一次检查
+                time.sleep(self.check_interval)
+            
             except Exception as e:
-                logger.error(f"获取Git状态失败: {e}")
+                error_message = f"监控releases异常: {str(e)}"
+                logger.error(error_message)
+                
+                # 短暂等待后继续
+                time.sleep(60)
+    
+    def _get_latest_release(self) -> Optional[Dict]:
+        """
+        获取最新release信息
         
-        # 检查release记录
-        record_path = os.path.join(self.local_repo_path, ".release_record")
-        if os.path.exists(record_path):
-            try:
-                with open(record_path, "r") as f:
-                    status["release_record"] = json.load(f)
-            except Exception as e:
-                logger.error(f"读取release记录失败: {e}")
+        Returns:
+            Optional[Dict]: 最新release信息，如果获取失败则返回None
+        """
+        # 构建API URL
+        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases/latest"
         
-        return status
+        # 设置请求头
+        headers = {}
+        if self.github_token:
+            headers["Authorization"] = f"token {self.github_token}"
+        
+        try:
+            # 发送请求
+            response = requests.get(api_url, headers=headers)
+            
+            # 检查响应状态
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"获取最新release失败: {response.status_code} {response.text}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"获取最新release异常: {str(e)}")
+            return None
+    
+    def _get_release_by_tag(self, tag_name: str) -> Optional[Dict]:
+        """
+        获取指定标签的release信息
+        
+        Args:
+            tag_name: release标签名
+            
+        Returns:
+            Optional[Dict]: release信息，如果获取失败则返回None
+        """
+        # 构建API URL
+        api_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases/tags/{tag_name}"
+        
+        # 设置请求头
+        headers = {}
+        if self.github_token:
+            headers["Authorization"] = f"token {self.github_token}"
+        
+        try:
+            # 发送请求
+            response = requests.get(api_url, headers=headers)
+            
+            # 检查响应状态
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"获取release {tag_name} 失败: {response.status_code} {response.text}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"获取release {tag_name} 异常: {str(e)}")
+            return None
+    
+    def _is_release_downloaded(self, tag_name: str) -> bool:
+        """
+        检查指定标签的release是否已下载
+        
+        Args:
+            tag_name: release标签名
+            
+        Returns:
+            bool: 是否已下载
+        """
+        # 检查最后下载的release
+        if self.last_downloaded_release == tag_name:
+            return True
+        
+        # 检查本地仓库是否存在
+        if not os.path.exists(os.path.join(self.local_repo_path, ".git")):
+            return False
+        
+        # 检查本地标签
+        try:
+            local_tags = self._run_git_command("git tag").splitlines()
+            return tag_name in local_tags
+        
+        except Exception:
+            return False
+    
+    def _backup_current_code(self) -> str:
+        """
+        备份当前代码
+        
+        Returns:
+            str: 备份目录路径
+        """
+        # 创建备份目录
+        backup_dir = os.path.join(
+            os.path.dirname(self.local_repo_path),
+            f"backup_{os.path.basename(self.local_repo_path)}_{int(time.time())}"
+        )
+        
+        # 复制当前代码到备份目录
+        if os.path.exists(self.local_repo_path):
+            shutil.copytree(self.local_repo_path, backup_dir)
+            logger.info(f"已备份当前代码到: {backup_dir}")
+        
+        return backup_dir
+    
+    def _restore_backup(self) -> bool:
+        """
+        恢复最近的备份
+        
+        Returns:
+            bool: 是否成功恢复
+        """
+        # 查找最近的备份
+        backup_pattern = os.path.join(
+            os.path.dirname(self.local_repo_path),
+            f"backup_{os.path.basename(self.local_repo_path)}_*"
+        )
+        
+        backup_dirs = sorted(
+            [d for d in glob.glob(backup_pattern) if os.path.isdir(d)],
+            key=os.path.getmtime,
+            reverse=True
+        )
+        
+        if not backup_dirs:
+            logger.error("未找到备份")
+            return False
+        
+        # 使用最近的备份
+        latest_backup = backup_dirs[0]
+        
+        # 删除当前代码
+        if os.path.exists(self.local_repo_path):
+            shutil.rmtree(self.local_repo_path)
+        
+        # 复制备份到当前目录
+        shutil.copytree(latest_backup, self.local_repo_path)
+        
+        logger.info(f"已恢复备份: {latest_backup}")
+        return True
+    
+    def _download_release_code(self, release: Dict) -> None:
+        """
+        下载release代码
+        
+        Args:
+            release: release信息
+        """
+        # 获取下载URL
+        download_url = None
+        for asset in release.get("assets", []):
+            if asset["name"].endswith(".zip") or asset["name"].endswith(".tar.gz"):
+                download_url = asset["browser_download_url"]
+                break
+        
+        # 如果没有找到下载URL，使用源代码下载URL
+        if download_url is None:
+            download_url = release["zipball_url"]
+        
+        # 创建临时目录
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # 下载文件
+            archive_path = os.path.join(temp_dir, "release_archive")
+            self._download_file(download_url, archive_path)
+            
+            # 解压文件
+            extract_dir = os.path.join(temp_dir, "extract")
+            os.makedirs(extract_dir, exist_ok=True)
+            
+            if download_url.endswith(".zip"):
+                self._run_command(f"unzip -q {archive_path} -d {extract_dir}")
+            else:
+                self._run_command(f"tar -xzf {archive_path} -C {extract_dir}")
+            
+            # 查找解压后的目录
+            extracted_dirs = [d for d in os.listdir(extract_dir) if os.path.isdir(os.path.join(extract_dir, d))]
+            if not extracted_dirs:
+                raise Exception("解压后未找到目录")
+            
+            extracted_dir = os.path.join(extract_dir, extracted_dirs[0])
+            
+            # 清空本地仓库（保留.git目录）
+            for item in os.listdir(self.local_repo_path):
+                if item == ".git":
+                    continue
+                
+                item_path = os.path.join(self.local_repo_path, item)
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                else:
+                    os.remove(item_path)
+            
+            # 复制解压后的文件到本地仓库
+            for item in os.listdir(extracted_dir):
+                src_path = os.path.join(extracted_dir, item)
+                dst_path = os.path.join(self.local_repo_path, item)
+                
+                if os.path.isdir(src_path):
+                    shutil.copytree(src_path, dst_path)
+                else:
+                    shutil.copy2(src_path, dst_path)
+        
+        # 如果本地仓库不是git仓库，初始化git
+        if not os.path.exists(os.path.join(self.local_repo_path, ".git")):
+            self._run_git_command("git init")
+            self._run_git_command(f"git remote add origin {self.repo_url}")
+        
+        # 创建标签
+        self._run_git_command(f"git tag {release['tag_name']}")
+        
+        logger.info(f"已下载release {release['tag_name']} 到 {self.local_repo_path}")
+    
+    def _download_file(self, url: str, output_path: str) -> None:
+        """
+        下载文件
+        
+        Args:
+            url: 下载URL
+            output_path: 输出路径
+        """
+        # 设置请求头
+        headers = {}
+        if self.github_token:
+            headers["Authorization"] = f"token {self.github_token}"
+        
+        # 下载文件
+        with requests.get(url, headers=headers, stream=True) as response:
+            response.raise_for_status()
+            
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+    
+    def _run_git_command(self, command: str) -> str:
+        """
+        运行git命令
+        
+        Args:
+            command: git命令
+            
+        Returns:
+            str: 命令输出
+        """
+        # 设置环境变量
+        env = os.environ.copy()
+        
+        # 如果使用SSH密钥，设置GIT_SSH_COMMAND
+        if not self.github_token and self.ssh_key_path:
+            env["GIT_SSH_COMMAND"] = f"ssh -i {self.ssh_key_path} -o StrictHostKeyChecking=no"
+        
+        # 运行命令
+        return self._run_command(command, env=env, cwd=self.local_repo_path)
+    
+    def _run_command(self, command: str, env: Optional[Dict] = None, cwd: Optional[str] = None) -> str:
+        """
+        运行命令
+        
+        Args:
+            command: 命令
+            env: 环境变量
+            cwd: 工作目录
+            
+        Returns:
+            str: 命令输出
+        """
+        # 运行命令
+        process = subprocess.run(
+            command,
+            shell=True,
+            env=env,
+            cwd=cwd,
+            capture_output=True,
+            text=True
+        )
+        
+        # 检查返回码
+        if process.returncode != 0:
+            raise Exception(f"命令执行失败: {process.stderr}")
+        
+        return process.stdout
