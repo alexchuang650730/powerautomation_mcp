@@ -1,385 +1,333 @@
 """
-PowerAutomation MCP工具 - 命令行接口
+命令行接口模块 - CLI
 
-该模块提供命令行接口，用于使用MCP工具的各种功能。
+该模块提供命令行接口，用于管理PowerAutomation代码库、运行测试和工作流程。
+支持下载、上传、测试和工作流等功能。
 
 作者: Manus AI
-日期: 2025-05-28
+日期: 2025-05-30
 """
 
 import os
 import sys
 import argparse
 import logging
-import json
-from typing import Dict, Any, Optional
+import subprocess
+import time
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Tuple
 
-# 添加父目录到系统路径，以便导入mcp_tool包
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from mcp_tool.mcp_central_coordinator import MCPCentralCoordinator
+# 导入统一配置管理
+from .unified_config import get_config
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("MCP-CLI")
+logger = logging.getLogger("CLI")
 
-def get_config_path(args) -> str:
-    """
-    获取配置文件路径
+class CLI:
+    """命令行接口类"""
     
-    Args:
-        args: 命令行参数
+    def __init__(self, config_path=None):
+        """
+        初始化CLI
         
-    Returns:
-        配置文件路径
-    """
-    # 优先使用命令行参数
-    if hasattr(args, 'config') and args.config:
-        return args.config
-    
-    # 其次使用环境变量
-    if 'MCP_CONFIG_PATH' in os.environ:
-        return os.environ['MCP_CONFIG_PATH']
-    
-    # 最后使用默认路径
-    default_path = os.path.expanduser("~/.powerautomation_mcp/config.json")
-    
-    # 如果默认路径不存在，创建一个
-    if not os.path.exists(default_path):
-        os.makedirs(os.path.dirname(default_path), exist_ok=True)
+        Args:
+            config_path: 配置文件路径，可选
+        """
+        # 获取统一配置
+        self.config_manager = get_config(config_path)
+        self.config = self.config_manager.get_all()
         
-        # 创建默认配置
-        default_config = {
-            "local_repo_path": "/Users/alexchuang/powerassistant/powerautomation",
-            "github_repo": "alexchuang650730/powerautomation",
-            "ssh_key_path": "~/.ssh/id_ed25519",
-            "test_script": "start_and_test.sh",
-            "readme_path": "README.md",
-            "auto_upload": True,
-            "auto_test": True,
-            "auto_solve": True
-        }
+        logger.info("CLI初始化完成")
+    
+    def download(self, version=None) -> bool:
+        """
+        下载指定版本的代码
         
-        with open(default_path, "w", encoding="utf-8") as f:
-            json.dump(default_config, f, ensure_ascii=False, indent=2)
+        Args:
+            version: 版本号，可选，默认为最新版本
         
-        logger.info(f"Created default configuration at {default_path}")
-    
-    return default_path
-
-def cmd_config(args) -> None:
-    """
-    配置命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 获取配置项
-    if args.get:
+        Returns:
+            bool: 是否成功下载
+        """
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
+            local_repo_path = self.config.get("local_repo_path")
+            repo_url = self.config.get("repo_url")
             
-            if args.get in config:
-                print(config[args.get])
+            if not local_repo_path or not repo_url:
+                logger.error("配置中缺少本地仓库路径或仓库URL")
+                return False
+            
+            # 确保本地仓库目录存在
+            os.makedirs(os.path.dirname(local_repo_path), exist_ok=True)
+            
+            # 检查本地仓库是否已存在
+            if os.path.exists(local_repo_path):
+                # 如果已存在，拉取最新代码
+                logger.info(f"本地仓库已存在，拉取最新代码: {local_repo_path}")
+                cmd = f"cd {local_repo_path} && git pull"
+                subprocess.run(cmd, shell=True, check=True)
             else:
-                logger.error(f"Configuration item '{args.get}' not found")
-                sys.exit(1)
+                # 如果不存在，克隆仓库
+                logger.info(f"克隆仓库: {repo_url} -> {local_repo_path}")
+                cmd = f"git clone {repo_url} {local_repo_path}"
+                subprocess.run(cmd, shell=True, check=True)
+            
+            # 如果指定了版本，切换到该版本
+            if version:
+                logger.info(f"切换到版本: {version}")
+                cmd = f"cd {local_repo_path} && git checkout {version}"
+                subprocess.run(cmd, shell=True, check=True)
+            
+            logger.info("下载完成")
+            return True
+        
         except Exception as e:
-            logger.error(f"Error reading configuration: {e}")
-            sys.exit(1)
+            logger.error(f"下载失败: {e}")
+            return False
     
-    # 设置配置项
-    elif args.set and args.value:
+    def upload(self, message=None) -> bool:
+        """
+        上传本地更改
+        
+        Args:
+            message: 提交信息，可选
+        
+        Returns:
+            bool: 是否成功上传
+        """
         try:
-            # 读取现有配置
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
+            local_repo_path = self.config.get("local_repo_path")
             
-            # 更新配置
-            config[args.set] = args.value
+            if not local_repo_path:
+                logger.error("配置中缺少本地仓库路径")
+                return False
             
-            # 保存配置
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            # 检查本地仓库是否存在
+            if not os.path.exists(local_repo_path):
+                logger.error(f"本地仓库不存在: {local_repo_path}")
+                return False
             
-            logger.info(f"Updated configuration item '{args.set}' to '{args.value}'")
+            # 添加所有更改
+            logger.info("添加所有更改")
+            cmd = f"cd {local_repo_path} && git add ."
+            subprocess.run(cmd, shell=True, check=True)
+            
+            # 提交更改
+            commit_message = message or f"自动提交 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            logger.info(f"提交更改: {commit_message}")
+            cmd = f"cd {local_repo_path} && git commit -m \"{commit_message}\""
+            subprocess.run(cmd, shell=True)
+            
+            # 推送更改
+            logger.info("推送更改")
+            cmd = f"cd {local_repo_path} && git push"
+            subprocess.run(cmd, shell=True, check=True)
+            
+            logger.info("上传完成")
+            return True
+        
         except Exception as e:
-            logger.error(f"Error updating configuration: {e}")
-            sys.exit(1)
+            logger.error(f"上传失败: {e}")
+            return False
     
-    # 显示所有配置
-    else:
+    def test(self) -> Dict[str, Any]:
+        """
+        运行测试
+        
+        Returns:
+            Dict[str, Any]: 测试结果
+        """
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
+            local_repo_path = self.config.get("local_repo_path")
+            test_script = self.config.get("test_script")
             
-            print(json.dumps(config, ensure_ascii=False, indent=2))
+            if not local_repo_path or not test_script:
+                logger.error("配置中缺少本地仓库路径或测试脚本")
+                return {"status": "error", "message": "配置中缺少本地仓库路径或测试脚本"}
+            
+            # 检查本地仓库是否存在
+            if not os.path.exists(local_repo_path):
+                logger.error(f"本地仓库不存在: {local_repo_path}")
+                return {"status": "error", "message": f"本地仓库不存在: {local_repo_path}"}
+            
+            # 检查测试脚本是否存在
+            test_script_path = os.path.join(local_repo_path, test_script)
+            if not os.path.exists(test_script_path):
+                logger.error(f"测试脚本不存在: {test_script_path}")
+                return {"status": "error", "message": f"测试脚本不存在: {test_script_path}"}
+            
+            # 运行测试脚本
+            logger.info(f"运行测试脚本: {test_script_path}")
+            cmd = f"cd {local_repo_path} && bash {test_script}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            # 解析测试结果
+            if result.returncode == 0:
+                logger.info("测试通过")
+                return {
+                    "status": "success",
+                    "message": "测试通过",
+                    "output": result.stdout
+                }
+            else:
+                logger.error(f"测试失败: {result.stderr}")
+                return {
+                    "status": "error",
+                    "message": "测试失败",
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+        
         except Exception as e:
-            logger.error(f"Error reading configuration: {e}")
-            sys.exit(1)
+            logger.error(f"测试失败: {e}")
+            return {"status": "error", "message": str(e)}
+    
+    def workflow(self) -> Dict[str, Any]:
+        """
+        运行工作流程
+        
+        Returns:
+            Dict[str, Any]: 工作流程结果
+        """
+        try:
+            # 检查是否启用自动下载
+            if self.config.get("auto_upload", True):
+                # 下载最新代码
+                logger.info("自动下载最新代码")
+                self.download()
+            
+            # 检查是否启用自动测试
+            if self.config.get("auto_test", True):
+                # 运行测试
+                logger.info("自动运行测试")
+                test_result = self.test()
+                
+                # 如果测试失败且启用自动解决问题
+                if test_result["status"] == "error" and self.config.get("auto_solve", True):
+                    logger.info("测试失败，尝试自动解决问题")
+                    # TODO: 调用ManusProblemSolver解决问题
+                    
+                    # 重新运行测试
+                    logger.info("重新运行测试")
+                    test_result = self.test()
+            
+            # 检查是否启用自动上传
+            if self.config.get("auto_upload", True):
+                # 上传更改
+                logger.info("自动上传更改")
+                self.upload("自动工作流程更新")
+            
+            logger.info("工作流程完成")
+            return {"status": "success", "message": "工作流程完成"}
+        
+        except Exception as e:
+            logger.error(f"工作流程失败: {e}")
+            return {"status": "error", "message": str(e)}
+    
+    def config_cmd(self, key=None, value=None) -> Dict[str, Any]:
+        """
+        配置命令
+        
+        Args:
+            key: 配置项键名，可选
+            value: 配置项值，可选
+        
+        Returns:
+            Dict[str, Any]: 配置结果
+        """
+        try:
+            # 如果指定了键和值，设置配置项
+            if key and value is not None:
+                logger.info(f"设置配置项: {key} = {value}")
+                self.config_manager.set(key, value)
+                self.config_manager.save()
+                return {"status": "success", "message": f"已设置配置项: {key} = {value}"}
+            
+            # 如果只指定了键，获取配置项
+            elif key:
+                value = self.config_manager.get(key)
+                logger.info(f"获取配置项: {key} = {value}")
+                return {"status": "success", "key": key, "value": value}
+            
+            # 如果没有指定键和值，获取所有配置
+            else:
+                config = self.config_manager.get_all()
+                logger.info("获取所有配置")
+                return {"status": "success", "config": config}
+        
+        except Exception as e:
+            logger.error(f"配置命令失败: {e}")
+            return {"status": "error", "message": str(e)}
 
-def cmd_download(args) -> None:
-    """
-    下载命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 初始化协调器
-    coordinator = MCPCentralCoordinator(config_path=config_path)
-    
-    # 检查并下载release
-    download_result = coordinator.check_and_download_release(tag_name=args.tag)
-    
-    if download_result["success"]:
-        logger.info(f"Successfully downloaded release: {download_result.get('tag_name')}")
-        logger.info(f"Local path: {download_result.get('local_path')}")
-    else:
-        logger.error(f"Failed to download release: {download_result.get('error')}")
-        sys.exit(1)
-
-def cmd_test(args) -> None:
-    """
-    测试命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 初始化协调器
-    coordinator = MCPCentralCoordinator(config_path=config_path)
-    
-    # 运行测试并收集问题
-    test_result = coordinator.run_tests_and_collect_issues()
-    
-    if test_result["success"]:
-        logger.info("Successfully ran tests and collected issues")
-        
-        issues = test_result.get("issues", [])
-        logger.info(f"Found {len(issues)} issues")
-        
-        for i, issue in enumerate(issues, 1):
-            logger.info(f"Issue {i}: {issue.get('type', '').upper()} in {issue.get('file', '')}")
-    else:
-        logger.error(f"Failed to run tests: {test_result.get('error')}")
-        sys.exit(1)
-
-def cmd_solve(args) -> None:
-    """
-    解决问题命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 初始化协调器
-    coordinator = MCPCentralCoordinator(config_path=config_path)
-    
-    # 分析并解决问题
-    solution_result = coordinator.analyze_and_solve_issues()
-    
-    if solution_result["success"]:
-        logger.info("Successfully analyzed and solved issues")
-        
-        process_result = solution_result.get("process_result", {})
-        issues_count = process_result.get("issues_count", 0)
-        
-        logger.info(f"Processed {issues_count} issues")
-        
-        if "results_file" in process_result:
-            logger.info(f"Results saved to: {process_result['results_file']}")
-        if "summary_file" in process_result:
-            logger.info(f"Summary report saved to: {process_result['summary_file']}")
-    else:
-        logger.error(f"Failed to solve issues: {solution_result.get('error')}")
-        sys.exit(1)
-
-def cmd_upload(args) -> None:
-    """
-    上传命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 初始化协调器
-    coordinator = MCPCentralCoordinator(config_path=config_path)
-    
-    # 上传更改
-    upload_result = coordinator.upload_changes(commit_message=args.message)
-    
-    if upload_result["success"]:
-        logger.info("Successfully uploaded changes")
-        logger.info(f"Commit message: {upload_result.get('commit_message')}")
-    else:
-        logger.error(f"Failed to upload changes: {upload_result.get('error')}")
-        sys.exit(1)
-
-def cmd_workflow(args) -> None:
-    """
-    工作流程命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    # 初始化协调器
-    coordinator = MCPCentralCoordinator(config_path=config_path)
-    
-    # 运行完整工作流程
-    workflow_result = coordinator.run_full_workflow(
-        tag_name=args.tag,
-        auto_upload=not args.no_upload
-    )
-    
-    # 生成工作流程报告
-    report_result = coordinator.generate_workflow_report(workflow_result)
-    
-    if workflow_result["success"]:
-        logger.info("Successfully completed workflow")
-        
-        if report_result["success"]:
-            logger.info(f"Workflow report saved to: {report_result['report_path']}")
-    else:
-        logger.error("Workflow failed")
-        
-        # 查找失败步骤
-        failed_steps = []
-        for step, result in workflow_result.get("steps", {}).items():
-            if not result.get("success") and not result.get("skipped"):
-                failed_steps.append(step)
-        
-        logger.error(f"Failed steps: {', '.join(failed_steps)}")
-        
-        if report_result["success"]:
-            logger.info(f"Detailed failure report saved to: {report_result['report_path']}")
-        
-        sys.exit(1)
-
-def cmd_reset(args) -> None:
-    """
-    重置命令处理函数
-    
-    Args:
-        args: 命令行参数
-    """
-    config_path = get_config_path(args)
-    
-    try:
-        # 读取配置
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        
-        local_repo_path = config.get("local_repo_path")
-        
-        if not local_repo_path:
-            logger.error("Local repository path not found in configuration")
-            sys.exit(1)
-        
-        # 清理日志目录
-        logs_dir = os.path.join(local_repo_path, "logs")
-        if os.path.exists(logs_dir):
-            logger.info(f"Cleaning logs directory: {logs_dir}")
-            for file in os.listdir(logs_dir):
-                file_path = os.path.join(logs_dir, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-        
-        # 清理报告目录
-        reports_dir = os.path.join(local_repo_path, "reports")
-        if os.path.exists(reports_dir):
-            logger.info(f"Cleaning reports directory: {reports_dir}")
-            for file in os.listdir(reports_dir):
-                file_path = os.path.join(reports_dir, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-        
-        # 清理解决方案目录
-        solutions_dir = os.path.join(local_repo_path, "manus_solutions")
-        if os.path.exists(solutions_dir):
-            logger.info(f"Cleaning solutions directory: {solutions_dir}")
-            for file in os.listdir(solutions_dir):
-                file_path = os.path.join(solutions_dir, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-        
-        logger.info("Successfully reset MCP tool state")
-    except Exception as e:
-        logger.error(f"Error resetting MCP tool state: {e}")
-        sys.exit(1)
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="PowerAutomation MCP工具命令行接口")
+    parser = argparse.ArgumentParser(description="PowerAutomation CLI")
     parser.add_argument("--config", help="配置文件路径")
-    parser.add_argument("--debug", action="store_true", help="启用调试模式")
     
+    # 子命令
     subparsers = parser.add_subparsers(dest="command", help="子命令")
     
-    # 配置命令
-    config_parser = subparsers.add_parser("config", help="配置管理")
-    config_parser.add_argument("--get", help="获取配置项")
-    config_parser.add_argument("--set", help="设置配置项")
-    config_parser.add_argument("--value", help="配置项的值")
-    
     # 下载命令
-    download_parser = subparsers.add_parser("download", help="检查并下载release")
-    download_parser.add_argument("--tag", help="指定的release标签名称")
-    
-    # 测试命令
-    test_parser = subparsers.add_parser("test", help="运行测试并收集问题")
-    
-    # 解决问题命令
-    solve_parser = subparsers.add_parser("solve", help="分析并解决问题")
+    download_parser = subparsers.add_parser("download", help="下载代码")
+    download_parser.add_argument("--version", help="版本号")
     
     # 上传命令
     upload_parser = subparsers.add_parser("upload", help="上传更改")
-    upload_parser.add_argument("--message", default="自动更新", help="提交信息")
+    upload_parser.add_argument("--message", help="提交信息")
+    
+    # 测试命令
+    subparsers.add_parser("test", help="运行测试")
     
     # 工作流程命令
-    workflow_parser = subparsers.add_parser("workflow", help="运行完整工作流程")
-    workflow_parser.add_argument("--tag", help="指定的release标签名称")
-    workflow_parser.add_argument("--no-upload", action="store_true", help="禁用自动上传")
+    subparsers.add_parser("workflow", help="运行工作流程")
     
-    # 重置命令
-    reset_parser = subparsers.add_parser("reset", help="重置工具状态")
+    # 配置命令
+    config_parser = subparsers.add_parser("config", help="配置命令")
+    config_parser.add_argument("--key", help="配置项键名")
+    config_parser.add_argument("--value", help="配置项值")
     
     args = parser.parse_args()
     
-    # 设置日志级别
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled")
+    # 创建CLI实例
+    cli = CLI(args.config)
     
-    # 处理命令
-    if args.command == "config":
-        cmd_config(args)
-    elif args.command == "download":
-        cmd_download(args)
-    elif args.command == "test":
-        cmd_test(args)
-    elif args.command == "solve":
-        cmd_solve(args)
+    # 执行命令
+    if args.command == "download":
+        result = cli.download(args.version)
+        print(f"下载{'成功' if result else '失败'}")
+    
     elif args.command == "upload":
-        cmd_upload(args)
+        result = cli.upload(args.message)
+        print(f"上传{'成功' if result else '失败'}")
+    
+    elif args.command == "test":
+        result = cli.test()
+        print(f"测试结果: {result['status']}")
+        if result["status"] == "error":
+            print(f"错误信息: {result['message']}")
+    
     elif args.command == "workflow":
-        cmd_workflow(args)
-    elif args.command == "reset":
-        cmd_reset(args)
+        result = cli.workflow()
+        print(f"工作流程结果: {result['status']}")
+        if result["status"] == "error":
+            print(f"错误信息: {result['message']}")
+    
+    elif args.command == "config":
+        result = cli.config_cmd(args.key, args.value)
+        if args.key and args.value is None:
+            print(f"{args.key} = {result['value']}")
+        elif not args.key:
+            import json
+            print(json.dumps(result["config"], indent=2, ensure_ascii=False))
+    
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()
