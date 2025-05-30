@@ -1,16 +1,12 @@
 """
 Manus问题解决驱动器模块 - ManusProblemSolver
 
-该模块用于驱动Manus进行问题定位、提出修复策略和测试方案。
-主要功能：
-1. 分析测试日志和README中的问题
-2. 调用Manus能力进行问题定位
-3. 生成修复策略建议
-4. 提出测试方案
-5. 结构化输出结果
-6. 版本回滚管理：支持每个版本的回滚，在持续出错时回滚至保存点
-7. 自动回滚：当测试方案持续出错超过5次时自动回滚到前一个保存点
-8. Manus.im集成：使用大模型+自动化工具将问题提交给Manus.im平台
+该模块主要功能：
+1. 版本回滚管理：支持每个版本的回滚，在持续出错时回滚至保存点
+2. 自动回滚：当测试方案持续出错超过5次时自动回滚到前一个保存点
+3. Manus.im集成：使用大模型+自动化工具将问题提交给Manus.im平台
+
+注意：分析问题并生成解决方案功能已被标记为不可用
 
 作者: Manus AI
 日期: 2025-05-30
@@ -43,9 +39,10 @@ logger = logging.getLogger("ManusProblemSolver")
 
 class ManusProblemSolver:
     """
-    Manus问题解决驱动器，负责分析问题、提出修复策略和测试方案。
-    支持版本回滚功能，在持续出错时可回滚至保存点。
+    Manus问题解决驱动器，支持版本回滚功能，在持续出错时可回滚至保存点。
     集成Manus.im平台，通过大模型+自动化工具提交问题。
+    
+    注意：分析问题并生成解决方案功能已被标记为不可用
     """
     
     def __init__(self, 
@@ -109,92 +106,40 @@ class ManusProblemSolver:
     
     def analyze_issues_and_generate_solutions(self, issues: Optional[List[Dict]] = None) -> Dict:
         """
-        分析问题并生成解决方案
+        [已禁用] 分析问题并生成解决方案
+        
+        此功能已被标记为不可用，请使用自动回滚和问题提交功能。
         
         Args:
             issues: 问题列表，如果为None则从README和测试日志中提取
             
         Returns:
-            Dict: 包含问题定位、修复策略和测试方案的解决方案
+            Dict: 包含禁用状态信息的字典
         """
-        self.recorder.record_thought("开始分析问题并生成解决方案")
+        self.recorder.record_thought("尝试调用已禁用的功能：分析问题并生成解决方案")
         
-        # 如果未提供问题列表，则从README和测试日志中提取
-        if issues is None:
-            issues = self._extract_issues_from_readme_and_logs()
-        
-        if not issues:
-            self.recorder.record_action(
-                "analyze_issues", 
-                {"issues_count": 0},
-                {"status": "no_issues", "message": "未发现需要解决的问题"}
-            )
-            return {
-                "status": "no_issues",
-                "message": "未发现需要解决的问题",
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        # 记录发现的问题
-        self.recorder.record_action(
-            "extract_issues", 
-            {},
-            {"issues_count": len(issues), "issues": issues}
-        )
-        
-        # 分析每个问题并生成解决方案
-        solutions = []
-        for issue in issues:
-            solution = self._analyze_single_issue(issue)
-            solutions.append(solution)
-        
-        # 生成综合报告
-        report = {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "issues_count": len(issues),
-            "solutions_count": len(solutions),
-            "solutions": solutions
+        return {
+            "status": "disabled",
+            "message": "此功能已被标记为不可用，请使用自动回滚和问题提交功能。",
+            "timestamp": datetime.now().isoformat()
         }
-        
-        self.recorder.record_action(
-            "generate_solutions", 
-            {"issues_count": len(issues)},
-            {"solutions_count": len(solutions)}
-        )
-        
-        return report
     
     def save_solutions_to_file(self, solutions: Dict, output_dir: Optional[str] = None) -> str:
         """
-        将解决方案保存到文件
+        [已禁用] 将解决方案保存到文件
+        
+        此功能已被标记为不可用，请使用自动回滚和问题提交功能。
         
         Args:
             solutions: 解决方案字典
             output_dir: 输出目录，如果为None则使用默认目录
             
         Returns:
-            str: 保存的文件路径
+            str: 包含禁用状态信息的字符串
         """
-        output_dir = output_dir or self.solutions_dir
-        os.makedirs(output_dir, exist_ok=True)
+        self.recorder.record_thought("尝试调用已禁用的功能：将解决方案保存到文件")
         
-        # 生成文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"solutions_{timestamp}.json"
-        filepath = os.path.join(output_dir, filename)
-        
-        # 保存到文件
-        with open(filepath, "w") as f:
-            json.dump(solutions, f, indent=2)
-        
-        self.recorder.record_action(
-            "save_solutions", 
-            {"output_dir": output_dir},
-            {"filepath": filepath}
-        )
-        
-        return filepath
+        return "此功能已被标记为不可用，请使用自动回滚和问题提交功能。"
     
     def create_save_point(self, name: Optional[str] = None) -> Dict:
         """
@@ -838,567 +783,83 @@ if __name__ == "__main__":
         
         return issues
     
+    # 以下方法已被标记为不可用，仅保留接口
     def _analyze_single_issue(self, issue: Dict) -> Dict:
         """
-        分析单个问题并生成解决方案
-        
-        Args:
-            issue: 问题字典
-            
-        Returns:
-            Dict: 解决方案
+        [已禁用] 分析单个问题并生成解决方案
         """
-        self.recorder.record_thought(f"分析问题: {issue['description']}")
-        
-        # 问题定位
-        problem_location = self._locate_problem(issue)
-        
-        # 修复策略
-        fix_strategy = self._generate_fix_strategy(issue, problem_location)
-        
-        # 测试方案
-        test_plan = self._generate_test_plan(issue, fix_strategy)
-        
-        solution = {
-            "issue": issue,
-            "problem_location": problem_location,
-            "fix_strategy": fix_strategy,
-            "test_plan": test_plan,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        self.recorder.record_action(
-            "analyze_issue", 
-            {"issue": issue},
-            {"solution": solution}
-        )
-        
-        return solution
+        return {"status": "disabled", "message": "此功能已被标记为不可用"}
     
     def _locate_problem(self, issue: Dict) -> Dict:
         """
-        定位问题
-        
-        Args:
-            issue: 问题字典
-            
-        Returns:
-            Dict: 问题位置信息
+        [已禁用] 定位问题
         """
-        self.recorder.record_thought(f"定位问题: {issue['description']}")
-        
-        # 根据问题描述查找相关文件
-        related_files = self._find_related_files(issue["description"])
-        
-        # 分析问题类型
-        problem_type = self._analyze_problem_type(issue["description"])
-        
-        # 定位问题代码
-        code_snippets = self._locate_problem_code(related_files, issue["description"])
-        
-        location = {
-            "related_files": related_files,
-            "problem_type": problem_type,
-            "code_snippets": code_snippets
-        }
-        
-        self.recorder.record_action(
-            "locate_problem", 
-            {"issue": issue},
-            {"location": location}
-        )
-        
-        return location
+        return {"status": "disabled", "message": "此功能已被标记为不可用"}
     
     def _generate_fix_strategy(self, issue: Dict, problem_location: Dict) -> Dict:
         """
-        生成修复策略
-        
-        Args:
-            issue: 问题字典
-            problem_location: 问题位置信息
-            
-        Returns:
-            Dict: 修复策略
+        [已禁用] 生成修复策略
         """
-        self.recorder.record_thought(f"生成修复策略: {issue['description']}")
-        
-        # 根据问题类型生成修复建议
-        fix_suggestions = self._generate_fix_suggestions(
-            issue["description"],
-            problem_location["problem_type"],
-            problem_location["code_snippets"]
-        )
-        
-        # 生成代码修改建议
-        code_changes = self._generate_code_changes(
-            problem_location["related_files"],
-            problem_location["code_snippets"],
-            fix_suggestions
-        )
-        
-        strategy = {
-            "fix_suggestions": fix_suggestions,
-            "code_changes": code_changes,
-            "priority": self._determine_priority(issue)
-        }
-        
-        self.recorder.record_action(
-            "generate_fix_strategy", 
-            {"issue": issue, "problem_location": problem_location},
-            {"strategy": strategy}
-        )
-        
-        return strategy
+        return {"status": "disabled", "message": "此功能已被标记为不可用"}
     
     def _generate_test_plan(self, issue: Dict, fix_strategy: Dict) -> Dict:
         """
-        生成测试方案
-        
-        Args:
-            issue: 问题字典
-            fix_strategy: 修复策略
-            
-        Returns:
-            Dict: 测试方案
+        [已禁用] 生成测试方案
         """
-        self.recorder.record_thought(f"生成测试方案: {issue['description']}")
-        
-        # 生成测试步骤
-        test_steps = self._generate_test_steps(issue["description"], fix_strategy)
-        
-        # 生成验证标准
-        verification_criteria = self._generate_verification_criteria(issue["description"])
-        
-        plan = {
-            "test_steps": test_steps,
-            "verification_criteria": verification_criteria,
-            "estimated_time": self._estimate_test_time(test_steps)
-        }
-        
-        self.recorder.record_action(
-            "generate_test_plan", 
-            {"issue": issue, "fix_strategy": fix_strategy},
-            {"plan": plan}
-        )
-        
-        return plan
+        return {"status": "disabled", "message": "此功能已被标记为不可用"}
     
     def _find_related_files(self, issue_description: str) -> List[str]:
         """
-        根据问题描述查找相关文件
-        
-        Args:
-            issue_description: 问题描述
-            
-        Returns:
-            List[str]: 相关文件路径列表
+        [已禁用] 根据问题描述查找相关文件
         """
-        related_files = []
-        
-        # 从问题描述中提取可能的文件名或模块名
-        file_patterns = [
-            r"(?:in|at|from|file)\s+['\"]?([a-zA-Z0-9_/\.]+\.py)['\"]?",
-            r"(?:module|class|function)\s+['\"]?([a-zA-Z0-9_/\.]+)['\"]?",
-            r"([a-zA-Z0-9_]+)\.py"
-        ]
-        
-        potential_files = []
-        for pattern in file_patterns:
-            matches = re.finditer(pattern, issue_description, re.IGNORECASE)
-            for match in matches:
-                potential_files.append(match.group(1))
-        
-        # 搜索仓库中的文件
-        for root, _, files in os.walk(self.repo_path):
-            if ".git" in root or "__pycache__" in root:
-                continue
-                
-            for file in files:
-                if not file.endswith(".py"):
-                    continue
-                    
-                file_path = os.path.join(root, file)
-                rel_path = os.path.relpath(file_path, self.repo_path)
-                
-                # 检查文件名是否匹配
-                for potential_file in potential_files:
-                    if potential_file in rel_path:
-                        related_files.append(rel_path)
-                        break
-        
-        return related_files
+        return []
     
     def _analyze_problem_type(self, issue_description: str) -> str:
         """
-        分析问题类型
-        
-        Args:
-            issue_description: 问题描述
-            
-        Returns:
-            str: 问题类型
+        [已禁用] 分析问题类型
         """
-        # 定义问题类型关键词
-        problem_types = {
-            "syntax_error": ["SyntaxError", "语法错误", "syntax error"],
-            "runtime_error": ["RuntimeError", "运行时错误", "runtime error"],
-            "import_error": ["ImportError", "ModuleNotFoundError", "导入错误", "找不到模块"],
-            "attribute_error": ["AttributeError", "属性错误", "没有属性"],
-            "type_error": ["TypeError", "类型错误", "类型不匹配"],
-            "value_error": ["ValueError", "值错误", "无效的值"],
-            "index_error": ["IndexError", "索引错误", "索引超出范围"],
-            "key_error": ["KeyError", "键错误", "找不到键"],
-            "name_error": ["NameError", "名称错误", "未定义的名称"],
-            "file_not_found": ["FileNotFoundError", "找不到文件", "file not found"],
-            "permission_error": ["PermissionError", "权限错误", "permission denied"],
-            "timeout_error": ["TimeoutError", "超时错误", "timeout"],
-            "connection_error": ["ConnectionError", "连接错误", "connection failed"],
-            "memory_error": ["MemoryError", "内存错误", "内存不足"],
-            "assertion_error": ["AssertionError", "断言错误", "assertion failed"],
-            "logic_error": ["逻辑错误", "logic error", "逻辑问题"],
-            "configuration_error": ["配置错误", "configuration error", "配置问题"],
-            "dependency_error": ["依赖错误", "dependency error", "依赖问题"],
-            "performance_issue": ["性能问题", "performance issue", "性能下降"],
-            "ui_issue": ["UI问题", "界面问题", "UI issue", "interface issue"],
-            "compatibility_issue": ["兼容性问题", "compatibility issue", "不兼容"],
-            "security_issue": ["安全问题", "security issue", "漏洞"],
-            "data_issue": ["数据问题", "data issue", "数据错误"],
-            "network_issue": ["网络问题", "network issue", "网络错误"],
-            "unknown": []
-        }
-        
-        # 检查问题描述中是否包含各类型的关键词
-        for problem_type, keywords in problem_types.items():
-            for keyword in keywords:
-                if keyword.lower() in issue_description.lower():
-                    return problem_type
-        
         return "unknown"
     
     def _locate_problem_code(self, related_files: List[str], issue_description: str) -> List[Dict]:
         """
-        定位问题代码
-        
-        Args:
-            related_files: 相关文件路径列表
-            issue_description: 问题描述
-            
-        Returns:
-            List[Dict]: 问题代码片段列表
+        [已禁用] 定位问题代码
         """
-        code_snippets = []
-        
-        # 从问题描述中提取可能的行号
-        line_number_pattern = r"(?:line|行)\s*(\d+)"
-        line_number_match = re.search(line_number_pattern, issue_description, re.IGNORECASE)
-        target_line = int(line_number_match.group(1)) if line_number_match else None
-        
-        # 从问题描述中提取可能的错误信息
-        error_message_pattern = r"(?:error|错误|exception|异常)[:：]\s*(.+?)(?=\n|$)"
-        error_message_match = re.search(error_message_pattern, issue_description, re.IGNORECASE)
-        error_message = error_message_match.group(1).strip() if error_message_match else None
-        
-        # 检查每个相关文件
-        for file_path in related_files:
-            full_path = os.path.join(self.repo_path, file_path)
-            
-            if not os.path.exists(full_path):
-                continue
-            
-            with open(full_path, "r") as f:
-                lines = f.readlines()
-            
-            # 如果有目标行号，则提取该行及其上下文
-            if target_line is not None and 1 <= target_line <= len(lines):
-                start_line = max(1, target_line - 5)
-                end_line = min(len(lines), target_line + 5)
-                
-                snippet = {
-                    "file": file_path,
-                    "start_line": start_line,
-                    "end_line": end_line,
-                    "target_line": target_line,
-                    "code": "".join(lines[start_line-1:end_line])
-                }
-                
-                code_snippets.append(snippet)
-                continue
-            
-            # 如果有错误信息，则查找包含该错误信息的行
-            if error_message is not None:
-                for i, line in enumerate(lines, 1):
-                    if error_message.lower() in line.lower():
-                        start_line = max(1, i - 5)
-                        end_line = min(len(lines), i + 5)
-                        
-                        snippet = {
-                            "file": file_path,
-                            "start_line": start_line,
-                            "end_line": end_line,
-                            "target_line": i,
-                            "code": "".join(lines[start_line-1:end_line])
-                        }
-                        
-                        code_snippets.append(snippet)
-                        break
-            
-            # 如果没有找到特定行，则提取文件的前20行作为上下文
-            if not code_snippets:
-                snippet = {
-                    "file": file_path,
-                    "start_line": 1,
-                    "end_line": min(20, len(lines)),
-                    "target_line": None,
-                    "code": "".join(lines[:min(20, len(lines))])
-                }
-                
-                code_snippets.append(snippet)
-        
-        return code_snippets
+        return []
     
     def _generate_fix_suggestions(self, issue_description: str, problem_type: str, code_snippets: List[Dict]) -> List[str]:
         """
-        生成修复建议
-        
-        Args:
-            issue_description: 问题描述
-            problem_type: 问题类型
-            code_snippets: 问题代码片段列表
-            
-        Returns:
-            List[str]: 修复建议列表
+        [已禁用] 生成修复建议
         """
-        suggestions = []
-        
-        # 根据问题类型生成通用修复建议
-        if problem_type == "syntax_error":
-            suggestions.append("检查代码语法，确保括号、引号和缩进正确")
-            suggestions.append("检查是否有拼写错误或遗漏的冒号")
-        elif problem_type == "runtime_error":
-            suggestions.append("检查代码逻辑，确保所有可能的执行路径都有正确的处理")
-            suggestions.append("添加异常处理，捕获并处理可能的运行时错误")
-        elif problem_type == "import_error":
-            suggestions.append("检查依赖是否已安装，可能需要运行pip install命令")
-            suggestions.append("检查导入路径是否正确，确保模块在Python路径中")
-        elif problem_type == "attribute_error":
-            suggestions.append("检查对象是否有该属性，可能需要先初始化或检查拼写")
-            suggestions.append("确保在使用属性前对象已正确初始化")
-        elif problem_type == "type_error":
-            suggestions.append("检查变量类型，确保函数参数类型正确")
-            suggestions.append("添加类型转换，确保操作的对象类型兼容")
-        elif problem_type == "value_error":
-            suggestions.append("检查输入值是否在有效范围内")
-            suggestions.append("添加输入验证，确保值符合预期格式")
-        elif problem_type == "index_error":
-            suggestions.append("检查索引是否超出范围，确保在访问前检查列表长度")
-            suggestions.append("使用try-except捕获索引错误，提供默认值或错误处理")
-        elif problem_type == "key_error":
-            suggestions.append("检查字典键是否存在，可以使用get方法提供默认值")
-            suggestions.append("在访问键前使用in操作符检查键是否存在")
-        elif problem_type == "name_error":
-            suggestions.append("检查变量名是否拼写正确，确保在使用前已定义")
-            suggestions.append("检查变量作用域，确保在正确的作用域中访问")
-        elif problem_type == "file_not_found":
-            suggestions.append("检查文件路径是否正确，确保文件存在")
-            suggestions.append("使用绝对路径或相对于项目根目录的路径")
-        elif problem_type == "permission_error":
-            suggestions.append("检查文件或目录权限，确保有足够的访问权限")
-            suggestions.append("以管理员权限运行或修改文件权限")
-        elif problem_type == "timeout_error":
-            suggestions.append("增加超时时间，或者优化操作减少执行时间")
-            suggestions.append("添加重试机制，在超时后自动重试")
-        elif problem_type == "connection_error":
-            suggestions.append("检查网络连接，确保目标服务可访问")
-            suggestions.append("添加重试机制，在连接失败后自动重试")
-        elif problem_type == "memory_error":
-            suggestions.append("优化内存使用，减少内存占用")
-            suggestions.append("使用生成器或迭代器处理大数据集")
-        elif problem_type == "assertion_error":
-            suggestions.append("检查断言条件，确保符合预期")
-            suggestions.append("修改代码逻辑，确保满足断言条件")
-        elif problem_type == "logic_error":
-            suggestions.append("检查业务逻辑，确保符合需求")
-            suggestions.append("添加单元测试，验证逻辑正确性")
-        elif problem_type == "configuration_error":
-            suggestions.append("检查配置文件，确保格式正确且包含所有必要的配置项")
-            suggestions.append("提供默认配置，在配置缺失时使用默认值")
-        elif problem_type == "dependency_error":
-            suggestions.append("检查依赖版本，确保兼容性")
-            suggestions.append("更新requirements.txt，确保列出所有必要的依赖")
-        elif problem_type == "performance_issue":
-            suggestions.append("优化算法，减少时间复杂度")
-            suggestions.append("使用缓存或并行处理提高性能")
-        elif problem_type == "ui_issue":
-            suggestions.append("检查UI元素，确保正确显示和响应")
-            suggestions.append("添加响应式设计，适应不同屏幕尺寸")
-        elif problem_type == "compatibility_issue":
-            suggestions.append("检查兼容性要求，确保支持所有目标平台")
-            suggestions.append("添加兼容性检查，在不兼容时提供替代方案")
-        elif problem_type == "security_issue":
-            suggestions.append("检查安全漏洞，确保数据安全")
-            suggestions.append("添加安全措施，如输入验证、加密等")
-        elif problem_type == "data_issue":
-            suggestions.append("检查数据格式，确保符合预期")
-            suggestions.append("添加数据验证，在处理前验证数据有效性")
-        elif problem_type == "network_issue":
-            suggestions.append("检查网络配置，确保连接正确")
-            suggestions.append("添加网络诊断，在连接问题时提供诊断信息")
-        else:
-            suggestions.append("检查代码逻辑，确保符合预期")
-            suggestions.append("添加日志记录，帮助定位问题")
-        
-        # 根据代码片段生成具体修复建议
-        if code_snippets:
-            for snippet in code_snippets:
-                file_path = snippet["file"]
-                code = snippet["code"]
-                target_line = snippet["target_line"]
-                
-                if target_line is not None:
-                    suggestions.append(f"检查{file_path}文件第{target_line}行的代码")
-                else:
-                    suggestions.append(f"检查{file_path}文件的代码")
-        
-        return suggestions
+        return ["此功能已被标记为不可用"]
     
     def _generate_code_changes(self, related_files: List[str], code_snippets: List[Dict], fix_suggestions: List[str]) -> List[Dict]:
         """
-        生成代码修改建议
-        
-        Args:
-            related_files: 相关文件路径列表
-            code_snippets: 问题代码片段列表
-            fix_suggestions: 修复建议列表
-            
-        Returns:
-            List[Dict]: 代码修改建议列表
+        [已禁用] 生成代码修改建议
         """
-        code_changes = []
-        
-        # 根据代码片段和修复建议生成代码修改建议
-        for snippet in code_snippets:
-            file_path = snippet["file"]
-            code = snippet["code"]
-            target_line = snippet["target_line"]
-            
-            # 如果有目标行，则生成针对该行的修改建议
-            if target_line is not None:
-                change = {
-                    "file": file_path,
-                    "line": target_line,
-                    "original": code,
-                    "suggestion": "根据修复建议修改此行代码"
-                }
-                
-                code_changes.append(change)
-        
-        return code_changes
+        return []
     
     def _generate_test_steps(self, issue_description: str, fix_strategy: Dict) -> List[str]:
         """
-        生成测试步骤
-        
-        Args:
-            issue_description: 问题描述
-            fix_strategy: 修复策略
-            
-        Returns:
-            List[str]: 测试步骤列表
+        [已禁用] 生成测试步骤
         """
-        test_steps = []
-        
-        # 生成通用测试步骤
-        test_steps.append("准备测试环境，确保所有依赖已安装")
-        test_steps.append("运行单元测试，验证修复是否解决问题")
-        test_steps.append("运行集成测试，验证修复是否影响其他功能")
-        
-        # 根据问题描述和修复策略生成具体测试步骤
-        if "fix_suggestions" in fix_strategy:
-            for suggestion in fix_strategy["fix_suggestions"]:
-                if "检查" in suggestion:
-                    test_steps.append(f"验证{suggestion.replace('检查', '')}")
-        
-        return test_steps
+        return ["此功能已被标记为不可用"]
     
     def _generate_verification_criteria(self, issue_description: str) -> List[str]:
         """
-        生成验证标准
-        
-        Args:
-            issue_description: 问题描述
-            
-        Returns:
-            List[str]: 验证标准列表
+        [已禁用] 生成验证标准
         """
-        criteria = []
-        
-        # 生成通用验证标准
-        criteria.append("所有测试用例通过，无错误或警告")
-        criteria.append("问题不再复现，功能正常工作")
-        criteria.append("性能符合预期，无明显延迟或资源占用增加")
-        
-        return criteria
+        return ["此功能已被标记为不可用"]
     
     def _estimate_test_time(self, test_steps: List[str]) -> str:
         """
-        估计测试时间
-        
-        Args:
-            test_steps: 测试步骤列表
-            
-        Returns:
-            str: 估计时间
+        [已禁用] 估计测试时间
         """
-        # 简单估计：每个测试步骤5分钟
-        minutes = len(test_steps) * 5
-        
-        if minutes < 60:
-            return f"{minutes}分钟"
-        else:
-            hours = minutes // 60
-            remaining_minutes = minutes % 60
-            
-            if remaining_minutes == 0:
-                return f"{hours}小时"
-            else:
-                return f"{hours}小时{remaining_minutes}分钟"
+        return "此功能已被标记为不可用"
     
     def _determine_priority(self, issue: Dict) -> str:
         """
-        确定问题优先级
-        
-        Args:
-            issue: 问题字典
-            
-        Returns:
-            str: 优先级
+        [已禁用] 确定问题优先级
         """
-        description = issue["description"].lower()
-        
-        # 高优先级关键词
-        high_priority_keywords = ["crash", "崩溃", "critical", "严重", "block", "阻塞", "urgent", "紧急", "security", "安全"]
-        
-        # 中优先级关键词
-        medium_priority_keywords = ["error", "错误", "bug", "缺陷", "issue", "问题", "fail", "失败"]
-        
-        # 低优先级关键词
-        low_priority_keywords = ["minor", "轻微", "cosmetic", "外观", "enhancement", "增强", "suggestion", "建议"]
-        
-        # 检查优先级
-        for keyword in high_priority_keywords:
-            if keyword in description:
-                return "high"
-        
-        for keyword in medium_priority_keywords:
-            if keyword in description:
-                return "medium"
-        
-        for keyword in low_priority_keywords:
-            if keyword in description:
-                return "low"
-        
-        # 默认为中优先级
         return "medium"
     
     def _find_save_point(self, save_point_id: Union[int, str]) -> Optional[Dict]:
