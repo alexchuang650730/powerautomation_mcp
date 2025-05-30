@@ -30,16 +30,22 @@ logger = logging.getLogger("MacVisualCalibrator")
 class MacVisualCalibrator:
     """Mac专用视觉校准器类"""
     
-    def __init__(self, config_file=None):
+    def __init__(self, config_file=None, output_dir=None):
         """
         初始化Mac视觉校准器
         
         Args:
             config_file: 配置文件路径，可选
+            output_dir: 输出目录路径，可选，优先级高于配置文件
         """
         self.config_file = config_file
+        self.output_dir = output_dir
         self.config = self._load_config()
         self.temp_dir = tempfile.mkdtemp(prefix="mac_visual_calibration_")
+        
+        # 如果指定了输出目录，覆盖配置中的日志目录
+        if self.output_dir:
+            self.config["log_dir"] = self.output_dir
         
         # 创建日志目录
         os.makedirs(self.config.get("log_dir", os.path.expanduser("~/mcp_logs")), exist_ok=True)
@@ -595,12 +601,36 @@ class MacVisualCalibrator:
             logger.info("步骤7: 更新自动监控配置")
             self.update_auto_monitor_config(regions)
             
+            # 复制最终结果到输出目录
+            final_screenshot_path = os.path.join(
+                self.config.get("log_dir", os.path.expanduser("~/mcp_logs")),
+                f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            final_grid_path = os.path.join(
+                self.config.get("log_dir", os.path.expanduser("~/mcp_logs")),
+                f"grid_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            final_marked_path = os.path.join(
+                self.config.get("log_dir", os.path.expanduser("~/mcp_logs")),
+                f"marked_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            
+            # 复制文件
+            img = Image.open(screenshot_path)
+            img.save(final_screenshot_path)
+            
+            img = Image.open(grid_path)
+            img.save(final_grid_path)
+            
+            img = Image.open(marked_path)
+            img.save(final_marked_path)
+            
             # 返回结果
             result = {
                 "success": True,
-                "screenshot_path": screenshot_path,
-                "grid_path": grid_path,
-                "marked_path": marked_path,
+                "screenshot_path": final_screenshot_path,
+                "grid_path": final_grid_path,
+                "marked_path": final_marked_path,
                 "regions": regions,
                 "region_images": region_images
             }
@@ -618,10 +648,11 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Mac专用视觉校准工具')
     parser.add_argument('--config', help='配置文件路径')
+    parser.add_argument('--output_dir', help='输出目录路径')
     args = parser.parse_args()
     
     # 创建校准器
-    calibrator = MacVisualCalibrator(args.config)
+    calibrator = MacVisualCalibrator(args.config, args.output_dir)
     
     # 运行校准
     result = calibrator.run_calibration()
