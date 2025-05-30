@@ -1,10 +1,21 @@
-pytest>=7.0.0
-coverage>=6.0.0
+# 基础依赖
+pillow>=9.0.0
 numpy>=1.20.0
-pandas>=1.3.0
-matplotlib>=3.4.0
 requests>=2.25.0
-pillow>=8.0.0
-jsonschema>=4.0.0
-beautifulsoup4>=4.9.0
-markdown>=3.3.0
+pyyaml>=6.0
+python-dateutil>=2.8.0
+
+# 跨平台依赖
+pyautogui>=0.9.53
+pygetwindow>=0.0.9
+pyperclip>=1.8.2
+
+# Windows特定依赖
+pywin32>=300; sys_platform == 'win32'
+
+# Mac特定依赖
+# 无需额外依赖，使用系统命令
+
+# 测试依赖
+pytest>=7.0.0
+pytest-cov>=4.0.0
