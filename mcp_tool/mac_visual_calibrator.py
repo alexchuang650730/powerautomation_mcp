@@ -30,16 +30,20 @@ logger = logging.getLogger("MacVisualCalibrator")
 class MacVisualCalibrator:
     """Mac专用视觉校准器类"""
     
-    def __init__(self, config_file=None, output_dir=None):
+    def __init__(self, config_file=None, output_dir=None, simple_mode=False, manual_regions=False):
         """
         初始化Mac视觉校准器
         
         Args:
             config_file: 配置文件路径，可选
             output_dir: 输出目录路径，可选，优先级高于配置文件
+            simple_mode: 是否使用简化模式（不使用AppleScript），可选
+            manual_regions: 是否使用手动区域标定模式，可选
         """
         self.config_file = config_file
         self.output_dir = output_dir
+        self.simple_mode = simple_mode
+        self.manual_regions = manual_regions
         self.config = self._load_config()
         self.temp_dir = tempfile.mkdtemp(prefix="mac_visual_calibration_")
         
@@ -53,6 +57,8 @@ class MacVisualCalibrator:
         logger.info("Mac视觉校准器初始化完成")
         logger.info(f"临时文件目录: {self.temp_dir}")
         logger.info(f"日志目录: {self.config.get('log_dir', os.path.expanduser('~/mcp_logs'))}")
+        logger.info(f"简化模式: {self.simple_mode}")
+        logger.info(f"手动区域标定模式: {self.manual_regions}")
     
     def _load_config(self) -> Dict:
         """
@@ -69,7 +75,11 @@ class MacVisualCalibrator:
             "calibration_grid_size": 10,  # 校准网格大小
             "detection_confidence_threshold": 0.7,  # 检测置信度阈值
             "work_list_css_selector": ".work-list-container",  # 工作列表CSS选择器
-            "action_list_css_selector": ".action-list-container"  # 操作列表CSS选择器
+            "action_list_css_selector": ".action-list-container",  # 操作列表CSS选择器
+            "simple_mode": False,  # 是否使用简化模式
+            "manual_regions": False,  # 是否使用手动区域标定模式
+            "default_work_list_region": [0.05, 0.2, 0.45, 0.8],  # 默认工作列表区域 [左, 上, 右, 下] 相对比例
+            "default_action_list_region": [0.55, 0.2, 0.95, 0.8]  # 默认操作列表区域 [左, 上, 右, 下] 相对比例
         }
         
         if self.config_file and os.path.exists(self.config_file):
@@ -134,6 +144,17 @@ class MacVisualCalibrator:
         Returns:
             Dict[str, Any]: 浏览器信息，包括名称、窗口位置等
         """
+        # 如果使用简化模式，返回默认值
+        if self.simple_mode:
+            logger.info("使用简化模式，返回默认浏览器信息")
+            return {
+                "name": "SimpleBrowser",
+                "path": "",
+                "id": "",
+                "position": {"x": 0, "y": 0},
+                "size": {"width": 0, "height": 0}
+            }
+        
         try:
             # 使用AppleScript获取前台应用信息
             script = """
@@ -200,6 +221,11 @@ class MacVisualCalibrator:
         Returns:
             Optional[str]: 当前URL，如果失败则返回None
         """
+        # 如果使用简化模式，返回默认值
+        if self.simple_mode:
+            logger.info("使用简化模式，返回默认URL")
+            return "https://manus.im/"
+        
         try:
             # 获取浏览器信息
             browser_info = self.get_active_browser_info()
@@ -255,6 +281,18 @@ class MacVisualCalibrator:
             Optional[Tuple[int, int, int, int]]: 浏览器窗口坐标 (x1, y1, x2, y2)，如果检测失败则返回None
         """
         try:
+            # 如果使用简化模式，使用全屏作为浏览器窗口
+            if self.simple_mode:
+                # 获取屏幕尺寸
+                img = Image.open(screenshot_path)
+                width, height = img.size
+                
+                # 使用全屏作为浏览器窗口
+                browser_window = (0, 0, width, height)
+                
+                logger.info(f"简化模式，使用全屏作为浏览器窗口: {browser_window}")
+                return browser_window
+            
             # 获取浏览器信息
             browser_info = self.get_active_browser_info()
             
@@ -373,25 +411,34 @@ class MacVisualCalibrator:
             width = x2 - x1
             height = y2 - y1
             
+            # 如果使用手动区域标定模式，提示用户手动标定
+            if self.manual_regions:
+                logger.info("使用手动区域标定模式")
+                return self._manual_region_selection(screenshot_path, browser_window)
+            
             # 获取当前URL
-            url = self.get_browser_url()
+            url = self.get_browser_url() if not self.simple_mode else "https://manus.im/"
             
             # 检查是否为目标网站
             if url and "manus.im" in url:
                 logger.info(f"检测到目标网站: {url}")
                 
                 # 根据manus.im网站的布局估计区域位置
-                # 工作列表通常在左侧
-                work_list_x1 = x1 + width * 0.05  # 左边缘偏移5%
-                work_list_y1 = y1 + height * 0.2  # 顶部偏移20%
-                work_list_x2 = x1 + width * 0.45  # 宽度为40%
-                work_list_y2 = y1 + height * 0.8  # 高度为60%
+                # 使用配置中的默认区域比例
+                work_list_region = self.config.get("default_work_list_region", [0.05, 0.2, 0.45, 0.8])
+                action_list_region = self.config.get("default_action_list_region", [0.55, 0.2, 0.95, 0.8])
                 
-                # 操作列表通常在右侧
-                action_list_x1 = x1 + width * 0.55  # 左边缘偏移55%
-                action_list_y1 = y1 + height * 0.2  # 顶部偏移20%
-                action_list_x2 = x1 + width * 0.95  # 宽度为40%
-                action_list_y2 = y1 + height * 0.8  # 高度为60%
+                # 工作列表
+                work_list_x1 = x1 + width * work_list_region[0]
+                work_list_y1 = y1 + height * work_list_region[1]
+                work_list_x2 = x1 + width * work_list_region[2]
+                work_list_y2 = y1 + height * work_list_region[3]
+                
+                # 操作列表
+                action_list_x1 = x1 + width * action_list_region[0]
+                action_list_y1 = y1 + height * action_list_region[1]
+                action_list_x2 = x1 + width * action_list_region[2]
+                action_list_y2 = y1 + height * action_list_region[3]
                 
                 regions = {
                     "work_list": (int(work_list_x1), int(work_list_y1), int(work_list_x2), int(work_list_y2)),
@@ -401,12 +448,24 @@ class MacVisualCalibrator:
                 logger.warning(f"未检测到目标网站，当前URL: {url}")
                 
                 # 使用默认区域
-                work_list_region = (x1 + width // 10, y1 + height // 4, x1 + width // 2 - width // 10, y2 - height // 4)
-                action_list_region = (x1 + width // 2 + width // 10, y1 + height // 4, x2 - width // 10, y2 - height // 4)
+                work_list_region = self.config.get("default_work_list_region", [0.05, 0.2, 0.45, 0.8])
+                action_list_region = self.config.get("default_action_list_region", [0.55, 0.2, 0.95, 0.8])
+                
+                # 工作列表
+                work_list_x1 = x1 + width * work_list_region[0]
+                work_list_y1 = y1 + height * work_list_region[1]
+                work_list_x2 = x1 + width * work_list_region[2]
+                work_list_y2 = y1 + height * work_list_region[3]
+                
+                # 操作列表
+                action_list_x1 = x1 + width * action_list_region[0]
+                action_list_y1 = y1 + height * action_list_region[1]
+                action_list_x2 = x1 + width * action_list_region[2]
+                action_list_y2 = y1 + height * action_list_region[3]
                 
                 regions = {
-                    "work_list": work_list_region,
-                    "action_list": action_list_region
+                    "work_list": (int(work_list_x1), int(work_list_y1), int(work_list_x2), int(work_list_y2)),
+                    "action_list": (int(action_list_x1), int(action_list_y1), int(action_list_x2), int(action_list_y2))
                 }
             
             logger.info(f"检测到内容区域: {regions}")
@@ -418,6 +477,123 @@ class MacVisualCalibrator:
                 "work_list": (0, 0, 0, 0),
                 "action_list": (0, 0, 0, 0)
             }
+    
+    def _manual_region_selection(self, screenshot_path: str, browser_window: Tuple[int, int, int, int]) -> Dict[str, Tuple[int, int, int, int]]:
+        """
+        手动区域选择
+        
+        Args:
+            screenshot_path: 截图文件路径
+            browser_window: 浏览器窗口坐标 (x1, y1, x2, y2)
+        
+        Returns:
+            Dict[str, Tuple[int, int, int, int]]: 手动选择的区域
+        """
+        try:
+            # 创建带网格的截图
+            grid_path = self.create_calibration_grid(screenshot_path, browser_window)
+            
+            # 复制到输出目录
+            output_grid_path = os.path.join(
+                self.config.get("log_dir", os.path.expanduser("~/mcp_logs")),
+                f"grid_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            )
+            img = Image.open(grid_path)
+            img.save(output_grid_path)
+            
+            # 提示用户查看网格图像
+            print("\n" + "="*80)
+            print("请查看网格图像，并记下工作列表和操作列表区域的坐标")
+            print(f"网格图像已保存到: {output_grid_path}")
+            print("="*80 + "\n")
+            
+            # 获取浏览器窗口尺寸
+            x1, y1, x2, y2 = browser_window
+            width = x2 - x1
+            height = y2 - y1
+            
+            # 提示用户输入工作列表区域坐标
+            print("请输入工作列表区域坐标 (格式: x1,y1,x2,y2)，或直接按回车使用默认值:")
+            work_list_input = input().strip()
+            
+            if work_list_input:
+                try:
+                    work_list_coords = [int(x) for x in work_list_input.split(",")]
+                    work_list_region = tuple(work_list_coords)
+                except:
+                    print("输入格式错误，使用默认值")
+                    work_list_region = (
+                        int(x1 + width * 0.05),
+                        int(y1 + height * 0.2),
+                        int(x1 + width * 0.45),
+                        int(y1 + height * 0.8)
+                    )
+            else:
+                work_list_region = (
+                    int(x1 + width * 0.05),
+                    int(y1 + height * 0.2),
+                    int(x1 + width * 0.45),
+                    int(y1 + height * 0.8)
+                )
+            
+            # 提示用户输入操作列表区域坐标
+            print("请输入操作列表区域坐标 (格式: x1,y1,x2,y2)，或直接按回车使用默认值:")
+            action_list_input = input().strip()
+            
+            if action_list_input:
+                try:
+                    action_list_coords = [int(x) for x in action_list_input.split(",")]
+                    action_list_region = tuple(action_list_coords)
+                except:
+                    print("输入格式错误，使用默认值")
+                    action_list_region = (
+                        int(x1 + width * 0.55),
+                        int(y1 + height * 0.2),
+                        int(x1 + width * 0.95),
+                        int(y1 + height * 0.8)
+                    )
+            else:
+                action_list_region = (
+                    int(x1 + width * 0.55),
+                    int(y1 + height * 0.2),
+                    int(x1 + width * 0.95),
+                    int(y1 + height * 0.8)
+                )
+            
+            regions = {
+                "work_list": work_list_region,
+                "action_list": action_list_region
+            }
+            
+            logger.info(f"手动选择的区域: {regions}")
+            return regions
+        
+        except Exception as e:
+            logger.error(f"手动区域选择失败: {e}")
+            
+            # 获取浏览器窗口尺寸
+            x1, y1, x2, y2 = browser_window
+            width = x2 - x1
+            height = y2 - y1
+            
+            # 使用默认区域
+            regions = {
+                "work_list": (
+                    int(x1 + width * 0.05),
+                    int(y1 + height * 0.2),
+                    int(x1 + width * 0.45),
+                    int(y1 + height * 0.8)
+                ),
+                "action_list": (
+                    int(x1 + width * 0.55),
+                    int(y1 + height * 0.2),
+                    int(x1 + width * 0.95),
+                    int(y1 + height * 0.8)
+                )
+            }
+            
+            logger.info(f"使用默认区域: {regions}")
+            return regions
     
     def visualize_detected_regions(self, screenshot_path: str, regions: Dict[str, Tuple[int, int, int, int]]) -> str:
         """
@@ -649,10 +825,12 @@ def main():
     parser = argparse.ArgumentParser(description='Mac专用视觉校准工具')
     parser.add_argument('--config', help='配置文件路径')
     parser.add_argument('--output_dir', help='输出目录路径')
+    parser.add_argument('--simple_mode', action='store_true', help='使用简化模式（不使用AppleScript）')
+    parser.add_argument('--manual_regions', action='store_true', help='使用手动区域标定模式')
     args = parser.parse_args()
     
     # 创建校准器
-    calibrator = MacVisualCalibrator(args.config, args.output_dir)
+    calibrator = MacVisualCalibrator(args.config, args.output_dir, args.simple_mode, args.manual_regions)
     
     # 运行校准
     result = calibrator.run_calibration()
